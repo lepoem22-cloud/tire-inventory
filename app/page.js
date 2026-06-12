@@ -26,6 +26,9 @@ const COL_FIELD = {
 };
 const FIELD_COL = Object.fromEntries(Object.entries(COL_FIELD).map(([k, v]) => [v, +k]));
 const TEXT_SET = new Set(['brand', 'pattern', 'pcode', 'size', 'pr', 'dot']);
+// 선택/복사 가능한 열(헤더 인덱스) 목록 — 계산열 제외
+const SELECTABLE_COLS = Object.keys(COL_FIELD).map(Number).sort((a, b) => a - b);
+const ADMIN_ONLY_COLS = new Set([0, 1, 2, 3, 4, 5, 6, 7]); // A~H 전부 관리자 전용
 // 방향키 좌우 이동 순서
 const NAV_FIELDS = ['brand', 'pattern', 'pcode', 'size', 'pr', 'dot', 'factory', 'qty', 'mount', 'direct', 'daily_del', 'ping_del', 'ping_dir', 'store11', 'storefarm', 'lotte', 'dc_rate', 'dc_price', '_calc'];
 
@@ -88,9 +91,7 @@ export default function Page() {
   const [onlySales, setOnlySales] = useState(false);
   const [sortInfo, setSortInfo] = useState({ idx: null, dir: true });
   const [viewStart, setViewStart] = useState(0);
-  const [user, setUser] = useState('');
-  const userRef = useRef('');
-  userRef.current = user;
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // 변하지 않는 참조들
   const DB         = useRef([]);
@@ -110,6 +111,11 @@ export default function Page() {
   const filterRef  = useRef({ brand: '', kw: '', showAll: false, onlySales: false });
   filterRef.current = { brand, kw, showAll, onlySales };
   const filteredRef = useRef([]);
+  // ── 셀 범위 선택 상태 ──
+  const [sel, setSel] = useState(null); // {aRow,aCol,bRow,bCol} (filtered 인덱스, 헤더열 인덱스)
+  const selecting = useRef(false);
+  const selRef = useRef(null);
+  selRef.current = sel;
 
   // ── 토스트 ─────────────────────────────────
   const toast = useCallback((msg, type = 'save', ms = 1800) => {
@@ -167,7 +173,7 @@ export default function Page() {
     fetch('/api/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updates, user: userRef.current || '미지정' }),
+      body: JSON.stringify({ updates }),
       signal: ctrl.signal,
     })
       .then(r => r.json())
@@ -254,7 +260,9 @@ export default function Page() {
 
   // ── 마운트 ─────────────────────────────────
   useEffect(() => {
-    try { setUser(localStorage.getItem('TIRE_USER') || ''); } catch (e) {}
+    fetch('/api/auth/me').then(r => r.json()).then(res => {
+      if (res.ok) setIsAdmin(res.role === 'admin');
+    }).catch(() => {});
     load();
     measureRowH();
 
@@ -285,7 +293,7 @@ export default function Page() {
       try {
         fetch('/api/batch', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ updates, user: userRef.current || '미지정' }), keepalive: true,
+          body: JSON.stringify({ updates }), keepalive: true,
         });
         crashClear();
       } catch (ex) { syncCrashSave(); }
@@ -435,6 +443,9 @@ export default function Page() {
   }, []);
 
   // ── 블록 붙여넣기 (시트에서 복사한 여러 셀) ──
+  // 비관리자가 수정할 수 없는 A~H 필드 (붙여넣기에서 건너뜀)
+  const ADMIN_ONLY = new Set(['brand', 'pattern', 'pcode', 'size', 'pr', 'dot', 'factory', 'qty']);
+
   const onPaste = useCallback((e) => {
     const el = e.target;
     if (!el.classList || !el.classList.contains('edit')) return;
@@ -447,20 +458,23 @@ export default function Page() {
     const id0 = +el.dataset.id;
     const startCol = FIELD_COL[f0];
     if (startCol == null) { toast('이 칸에는 블록 붙여넣기를 할 수 없습니다', 'warn'); return; }
-    const list = filteredRef.current;
+    // 붙여넣기 시작 시점의 화면 순서를 즉시 고정(스냅샷)하고, 이후엔 각 행의 고유 id로만 저장.
+    // → 도중에 다른 사람이 입력하거나 필터/정렬이 바뀌어도 항상 같은 행에 안전하게 기록됨.
+    const list = filteredRef.current.slice();
     const rIdx = list.findIndex(d => d.id === id0);
     if (rIdx < 0) return;
 
     const lines = text.replace(/\r/g, '').split('\n');
     if (lines.length && lines[lines.length - 1] === '') lines.pop();
 
-    let applied = 0;
+    let applied = 0, skippedAdmin = 0;
     lines.forEach((line, i) => {
       const d = list[rIdx + i];
       if (!d) return;
       line.split('\t').forEach((val, j) => {
         const fld = COL_FIELD[startCol + j];
-        if (!fld) return; // 읽기전용 열은 칸 수만 차지하고 건너뜀
+        if (!fld) return; // 계산 열은 칸 수만 차지하고 건너뜀
+        if (!isAdmin && ADMIN_ONLY.has(fld)) { skippedAdmin++; return; } // 권한 없는 열 건너뜀
         const v = TEXT_SET.has(fld) ? String(val).trim() : String(val).replace(/[^0-9.-]/g, '');
         d[fld] = v;
         pending.current.set(d.id + '_' + fld, { id: d.id, field: fld, value: v, el: null });
@@ -468,13 +482,16 @@ export default function Page() {
       });
     });
 
-    if (!applied) { toast('붙여넣을 수 있는 칸이 없습니다', 'warn'); return; }
+    if (!applied) {
+      toast(skippedAdmin ? '관리자만 수정할 수 있는 열입니다' : '붙여넣을 수 있는 칸이 없습니다', 'warn');
+      return;
+    }
     lastEdit.current = Date.now();
     syncCrashSave();
     setEpoch(x => x + 1); // 화면 입력칸 값 갱신
     queueSend();
-    toast(`${applied}개 셀 붙여넣음 — 저장 중`, 'save', 2200);
-  }, [syncCrashSave, queueSend, toast]);
+    toast(`${applied}개 셀 붙여넣음${skippedAdmin ? ` (권한 없는 ${skippedAdmin}칸 제외)` : ''} — 저장 중`, 'save', 2200);
+  }, [syncCrashSave, queueSend, toast, isAdmin]);
 
   const onKeyUp = useCallback((e) => {
     const el = e.target;
@@ -531,7 +548,7 @@ export default function Page() {
       const r = await fetch('/api/rows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count, user: userRef.current || '미지정' }),
+        body: JSON.stringify({ count }),
       });
       const res = await r.json();
       if (!res.ok) throw new Error(res.msg || '오류');
@@ -551,6 +568,134 @@ export default function Page() {
       toast('행 추가 실패: ' + e.message, 'err', 3000);
     }
   }, [addCount, toast]);
+
+  // ── 셀 범위 선택 ────────────────────────────
+  const selNorm = useCallback((sv) => {
+    if (!sv) return null;
+    return {
+      r0: Math.min(sv.aRow, sv.bRow), r1: Math.max(sv.aRow, sv.bRow),
+      c0: Math.min(sv.aCol, sv.bCol), c1: Math.max(sv.aCol, sv.bCol),
+    };
+  }, []);
+  const inSel = useCallback((rowIdx, colIdx) => {
+    const n = selNorm(selRef.current);
+    if (!n) return false;
+    return rowIdx >= n.r0 && rowIdx <= n.r1 && colIdx >= n.c0 && colIdx <= n.c1;
+  }, [selNorm]);
+
+  const onCellMouseDown = useCallback((e, rowIdx, colIdx) => {
+    // 입력칸 안을 클릭하면 편집 모드 → 선택 시작 안 함 (단 Shift는 범위확장)
+    const isInput = e.target.tagName === 'INPUT';
+    if (e.shiftKey && selRef.current) {
+      e.preventDefault();
+      setSel(s => ({ ...s, bRow: rowIdx, bCol: colIdx }));
+      return;
+    }
+    if (isInput) {
+      // 단일 셀 선택만 기록(드래그 대비), 편집은 그대로 허용
+      setSel({ aRow: rowIdx, aCol: colIdx, bRow: rowIdx, bCol: colIdx });
+      selecting.current = false;
+      return;
+    }
+    e.preventDefault();
+    selecting.current = true;
+    setSel({ aRow: rowIdx, aCol: colIdx, bRow: rowIdx, bCol: colIdx });
+  }, []);
+
+  const onCellMouseEnter = useCallback((rowIdx, colIdx) => {
+    if (!selecting.current) return;
+    setSel(s => (s ? { ...s, bRow: rowIdx, bCol: colIdx } : s));
+  }, []);
+
+  useEffect(() => {
+    const up = () => { selecting.current = false; };
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, []);
+
+  // 필터/정렬이 바뀌면 행 순서가 달라지므로 선택 해제 (잘못된 영역 조작 방지)
+  useEffect(() => { setSel(null); }, [brand, kw, showAll, onlySales, sortInfo.idx, sortInfo.dir]);
+
+  // 선택 영역 복사 (Ctrl+C) / 삭제 (Delete)
+  const copySelection = useCallback(() => {
+    const n = selNorm(selRef.current);
+    if (!n) return false;
+    const list = filteredRef.current;
+    const cols = SELECTABLE_COLS.filter(c => c >= n.c0 && c <= n.c1);
+    if (!cols.length) return false;
+    const lines = [];
+    for (let r = n.r0; r <= n.r1; r++) {
+      const d = list[r];
+      if (!d) continue;
+      const cells = cols.map(c => {
+        const f = COL_FIELD[c];
+        let v = d[f];
+        if (f === 'factory' || f === 'qty' || SALES_FIELDS.includes(f) || f === 'dc_price' || f === 'dc_rate')
+          v = toN(v) || '';
+        return v == null ? '' : String(v);
+      });
+      lines.push(cells.join('\t'));
+    }
+    const tsv = lines.join('\n');
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(tsv);
+      else {
+        const ta = document.createElement('textarea');
+        ta.value = tsv; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+      }
+      toast(`${lines.length}행 복사됨`, 'save', 1400);
+    } catch (e) { toast('복사 실패', 'err'); }
+    return true;
+  }, [selNorm, toast]);
+
+  const deleteSelection = useCallback(() => {
+    const n = selNorm(selRef.current);
+    if (!n) return false;
+    const list = filteredRef.current;
+    const cols = SELECTABLE_COLS.filter(c => c >= n.c0 && c <= n.c1);
+    let cleared = 0, denied = 0;
+    for (let r = n.r0; r <= n.r1; r++) {
+      const d = list[r];
+      if (!d) continue;
+      for (const c of cols) {
+        if (!isAdmin && ADMIN_ONLY_COLS.has(c)) { denied++; continue; }
+        const f = COL_FIELD[c];
+        d[f] = '';
+        pending.current.set(d.id + '_' + f, { id: d.id, field: f, value: '', el: null });
+        cleared++;
+      }
+    }
+    if (!cleared) { toast(denied ? '관리자만 지울 수 있는 열입니다' : '지울 칸이 없습니다', 'warn'); return true; }
+    lastEdit.current = Date.now();
+    syncCrashSave();
+    setEpoch(x => x + 1);
+    queueSend();
+    toast(`${cleared}칸 비움 — 저장 중`, 'save', 1600);
+    return true;
+  }, [selNorm, isAdmin, syncCrashSave, queueSend, toast]);
+
+  // 표 전역 키 처리 (선택 영역 복사/삭제)
+  useEffect(() => {
+    const onKey = (e) => {
+      const n = selNorm(selRef.current);
+      if (!n) return;
+      const multi = n.r0 !== n.r1 || n.c0 !== n.c1;
+      const el = document.activeElement;
+      const editing = el && el.tagName === 'INPUT' && el.classList.contains('edit');
+      // 복사: 다중 선택이면 입력칸 포커스 중이라도 영역 복사
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+        if (multi) { e.preventDefault(); copySelection(); }
+        return;
+      }
+      // 삭제: 입력 편집 중이 아니거나 다중 선택일 때
+      if ((e.key === 'Delete' || e.key === 'Backspace')) {
+        if (multi || !editing) { e.preventDefault(); deleteSelection(); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selNorm, copySelection, deleteSelection]);
 
   // ── 정렬 ───────────────────────────────────
   const doSort = useCallback((i) => {
@@ -607,12 +752,6 @@ export default function Page() {
           value={kw}
           onChange={e => { setKw(e.target.value); setViewStart(0); if (containerRef.current) containerRef.current.scrollTop = 0; }}
         />
-        <label className="chk-area" title="사용기록에 남을 이름/아이디">
-          사용자
-          <input value={user} placeholder="이름"
-            onChange={e => { setUser(e.target.value); try { localStorage.setItem('TIRE_USER', e.target.value); } catch (err) {} }}
-            style={{ width: 64, border: '1px solid #cbd5e0' }} />
-        </label>
         <label className="chk-area">
           <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} /> 품절포함
         </label>
@@ -620,6 +759,8 @@ export default function Page() {
           <input type="checkbox" checked={onlySales} onChange={e => setOnlySales(e.target.checked)} /> 출고만
         </label>
         <button className="btn" onClick={() => setSortInfo({ idx: null, dir: true })}>정렬초기화</button>
+        <button className="btn" title="다른 사람이 입력한 최신 내용 불러오기"
+          onClick={() => { lastEdit.current = 0; activeEdit.current = null; load(); }}>↻ 새로고침</button>
         <button className="btn" style={{ background: '#ebf8ff', borderColor: '#90cdf4', fontWeight: 'bold' }} onClick={() => setAddOpen(o => !o)}>＋ 행 추가</button>
         {addOpen && (
           <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
@@ -667,45 +808,59 @@ export default function Page() {
                 </td>
               </tr>
             )}
-            {visible.map(d => {
+            {visible.map((d, vi) => {
               const id = d.id;
+              const rowIdx = start + vi; // filtered 배열 기준 절대 행 인덱스
               const s = salesOf(d);
               const inv = toN(d.qty) - s;
               const calc = calcMap.current.get(id) || { t: '', u: toN(d.factory) };
               const checks = decodeChecks(d.note);
               const ek = (f) => `${id}:${f}:${epoch}`;
+              const tdCls = (colIdx, base) => (base || '') + (inSel(rowIdx, colIdx) ? ' cell-sel' : '');
+              const tdProps = (colIdx) => ({
+                onMouseDown: (e) => onCellMouseDown(e, rowIdx, colIdx),
+                onMouseEnter: () => onCellMouseEnter(rowIdx, colIdx),
+              });
               return (
                 <tr key={id}>
-                  {['brand', 'pattern', 'pcode', 'size', 'pr'].map(f => (
-                    <td key={f}>
-                      <input key={ek(f)} className="edit" data-id={id} data-f={f}
-                        defaultValue={d[f]} onInput={e => onCellInput(e, id, f)} />
+                  {['brand', 'pattern', 'pcode', 'size', 'pr'].map((f, ci) => (
+                    <td key={f} className={tdCls(ci)} {...tdProps(ci)}>
+                      {isAdmin
+                        ? <input key={ek(f)} className="edit" data-id={id} data-f={f}
+                            defaultValue={d[f]} onInput={e => onCellInput(e, id, f)} />
+                        : <span className="ro-txt">{d[f]}</span>}
                     </td>
                   ))}
-                  <td>
-                    <input key={ek('dot')} className="edit" data-id={id} data-f="dot"
-                      defaultValue={d.dot} onInput={e => onCellInput(e, id, 'dot')} />
+                  <td className={tdCls(5)} {...tdProps(5)}>
+                    {isAdmin
+                      ? <input key={ek('dot')} className="edit" data-id={id} data-f="dot"
+                          defaultValue={d.dot} onInput={e => onCellInput(e, id, 'dot')} />
+                      : <span className="ro-txt">{d.dot}</span>}
                   </td>
-                  <td>
-                    <input key={ek('factory')} className="edit" data-id={id} data-f="factory"
-                      defaultValue={toN(d.factory) || ''} onInput={e => onCellInput(e, id, 'factory')} />
+                  <td className={tdCls(6)} {...tdProps(6)}>
+                    {isAdmin
+                      ? <input key={ek('factory')} className="edit" data-id={id} data-f="factory"
+                          defaultValue={toN(d.factory) || ''} onInput={e => onCellInput(e, id, 'factory')} />
+                      : <span className="ro-txt">{toN(d.factory) ? '₩'+toN(d.factory).toLocaleString() : ''}</span>}
                   </td>
-                  <td>
-                    <input key={ek('qty')} className="edit" data-id={id} data-f="qty"
-                      defaultValue={toN(d.qty) || ''} onInput={e => onCellInput(e, id, 'qty')} />
+                  <td className={tdCls(7)} {...tdProps(7)}>
+                    {isAdmin
+                      ? <input key={ek('qty')} className="edit" data-id={id} data-f="qty"
+                          defaultValue={toN(d.qty) || ''} onInput={e => onCellInput(e, id, 'qty')} />
+                      : <span className="ro-txt">{toN(d.qty) || ''}</span>}
                   </td>
                   <td className="bi" id={'i-' + id}>{toN(d.qty) ? inv : ''}</td>
                   {SALES_FIELDS.map((f, fi) => (
-                    <td key={f} style={{ background: JQ_BG[fi] }}>
+                    <td key={f} className={tdCls(9 + fi)} style={{ background: JQ_BG[fi] }} {...tdProps(9 + fi)}>
                       <input key={ek(f)} className="edit" data-id={id} data-f={f}
                         defaultValue={toN(d[f]) || ''} onInput={e => onCellInput(e, id, f)} />
                     </td>
                   ))}
-                  <td className="br">
+                  <td className={tdCls(17, 'br')} {...tdProps(17)}>
                     <input key={ek('dc_rate')} className="edit" data-id={id} data-f="dc_rate"
                       defaultValue={toN(d.dc_rate) || ''} onInput={e => onCellInput(e, id, 'dc_rate')} />
                   </td>
-                  <td className="bs">
+                  <td className={tdCls(18, 'bs')} {...tdProps(18)}>
                     <input key={ek('dc_price')} className="edit" data-id={id} data-f="dc_price"
                       defaultValue={toN(d.dc_price) || ''} onInput={e => onCellInput(e, id, 'dc_price')} />
                   </td>

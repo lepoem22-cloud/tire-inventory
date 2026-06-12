@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { sql, ensureSchema } from '@/lib/db';
+import { currentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,10 @@ function s(v) {
 
 export async function POST(req) {
   try {
+    const auth = currentUser();
+    if (!auth || auth.role !== 'admin') {
+      return NextResponse.json({ ok: false, msg: '데이터 이관은 관리자만 할 수 있습니다' }, { status: 403 });
+    }
     await ensureSchema();
     const body = await req.json();
     const rows = Array.isArray(body.rows) ? body.rows : [];
