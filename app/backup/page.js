@@ -43,7 +43,7 @@ export default function BackupPage() {
         <div id="status" className="ok">{status}</div>
       </div>
       <div className="container">
-        <table style={{ minWidth: 1500 }}>
+        <table style={{ minWidth: 1700 }}>
           <thead>
             <tr>
               <th style={{ width: 86 }}>날짜</th>
@@ -64,11 +64,12 @@ export default function BackupPage() {
               <th style={{ width: 50 }}>롯데</th>
               <th style={{ width: 66 }} className="bi">출고합계</th>
               <th style={{ width: 76 }} className="bs">처리후수량</th>
+              <th style={{ width: 200 }}>특이사항(메모)</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={18} style={{ padding: '30px 0', color: '#718096', fontWeight: 'bold' }}>
+              <tr><td colSpan={19} style={{ padding: '30px 0', color: '#718096', fontWeight: 'bold' }}>
                 백업 기록이 없습니다 — 매일 저녁 8시 자동 백업 시 출고가 있던 품목이 여기에 쌓입니다
               </td></tr>
             )}
@@ -92,6 +93,7 @@ export default function BackupPage() {
                 <td>{it.lotte || ''}</td>
                 <td className="bi">{it.sales_total}</td>
                 <td className="bs">{it.new_qty}</td>
+                <td style={{ textAlign: 'left', whiteSpace: 'pre-wrap', fontSize: 11 }}>{it.note || ''}</td>
               </tr>
             ))}
           </tbody>

@@ -9,7 +9,7 @@ export async function GET() {
     const { rows } = await sql`
       SELECT ymd, hm, brand, pattern, pcode, size, pr, dot,
              qty, mount, direct, daily_del, ping_del, ping_dir,
-             store11, storefarm, lotte, sales_total, new_qty
+             store11, storefarm, lotte, sales_total, new_qty, note
       FROM backup_log
       ORDER BY id DESC
       LIMIT 2000

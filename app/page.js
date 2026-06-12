@@ -83,6 +83,8 @@ export default function Page() {
   const [epoch, setEpoch] = useState(0); // 데이터 리로드 시 입력값 강제 갱신
   const [status, setStatus] = useState({ msg: '연결중…', cls: 'loading' });
   const [toasts, setToasts] = useState([]);
+  // K·L 출고 메모 모달
+  const [memoModal, setMemoModal] = useState(null); // {id, channel, label, items, text} | null
 
   // 필터 state
   const [brand, setBrand] = useState('');
@@ -722,6 +724,42 @@ export default function Page() {
     return () => window.removeEventListener('keydown', onKey);
   }, [selNorm, copySelection, deleteSelection]);
 
+  // ── K·L 출고 메모 ──────────────────────────
+  const MEMO_LABEL = { direct: '직배(K)', daily_del: '택배(L)' };
+  const openMemo = useCallback((e, id, channel) => {
+    e.preventDefault();
+    setMemoModal({ id, channel, label: MEMO_LABEL[channel] || channel, items: null, text: '' });
+    fetch('/api/memo?id=' + id)
+      .then(r => r.json())
+      .then(res => setMemoModal(m => (m && m.id === id && m.channel === channel ? { ...m, items: res.ok ? res.items : [] } : m)))
+      .catch(() => setMemoModal(m => (m ? { ...m, items: [] } : m)));
+  }, []);
+  const saveMemo = useCallback(() => {
+    setMemoModal(m => {
+      if (!m) return m;
+      const text = (m.text || '').trim();
+      if (!text) { toast('메모 내용을 입력하세요', 'warn'); return m; }
+      fetch('/api/memo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: m.id, channel: m.channel, memo: text }),
+      })
+        .then(r => r.json())
+        .then(res => {
+          if (!res.ok) { toast('메모 저장 실패: ' + (res.msg || ''), 'err'); return; }
+          const d = byId.current.get(m.id);
+          if (d) {
+            d.memoCount = { ...(d.memoCount || {}) };
+            d.memoCount[m.channel] = (res.items || []).filter(x => x.channel === m.channel).length;
+            setEpoch(x => x + 1);
+          }
+          setMemoModal(cur => (cur && cur.id === m.id ? { ...cur, items: res.items || [], text: '' } : cur));
+          toast('메모 저장됨', 'save', 1500);
+        })
+        .catch(err => toast('메모 저장 실패: ' + (err.message || ''), 'err'));
+      return { ...m, text };
+    });
+  }, [toast]);
+
   // ── 정렬 ───────────────────────────────────
   const doSort = useCallback((i) => {
     const k = HDR[i] && HDR[i].k;
@@ -808,7 +846,6 @@ export default function Page() {
             <button className="btn" onClick={() => setAddOpen(false)}>취소</button>
           </span>
         )}
-        <a className="btn" href="/import" style={{ textDecoration: 'none', color: '#2d3748' }}>데이터 이관</a>
         <div className="mobile-hint">좌우 스크롤로 전체 열 확인</div>
         <div id="status" className={status.cls}>{status.msg}</div>
       </div>
@@ -840,7 +877,7 @@ export default function Page() {
             {total === 0 && (
               <tr>
                 <td colSpan={HDR.length} style={{ padding: '30px 0', color: '#718096', fontWeight: 'bold' }}>
-                  표시할 데이터가 없습니다 — 위의 「＋ 행 추가」로 빈 행을 만들거나, 「품절포함」 체크, 또는 「데이터 이관」을 이용하세요
+                  표시할 데이터가 없습니다 — 위의 「＋ 행 추가」로 빈 행을 만들거나 「품절포함」을 체크하세요
                 </td>
               </tr>
             )}
@@ -886,12 +923,20 @@ export default function Page() {
                       : <span className="ro-txt">{toN(d.qty) || ''}</span>}
                   </td>
                   <td className="bi" id={'i-' + id}>{toN(d.qty) ? inv : ''}</td>
-                  {SALES_FIELDS.map((f, fi) => (
-                    <td key={f} className={tdCls(9 + fi)} style={{ background: JQ_BG[fi] }} {...tdProps(9 + fi)}>
-                      <input key={ek(f)} className="edit" data-id={id} data-f={f}
-                        defaultValue={toN(d[f]) || ''} onInput={e => onCellInput(e, id, f)} />
-                    </td>
-                  ))}
+                  {SALES_FIELDS.map((f, fi) => {
+                    const memoable = (f === 'direct' || f === 'daily_del');
+                    const mc = memoable && d.memoCount ? (d.memoCount[f] || 0) : 0;
+                    return (
+                      <td key={f} className={tdCls(9 + fi) + (memoable ? ' memo-cell' : '')}
+                        style={{ background: JQ_BG[fi] }} {...tdProps(9 + fi)}
+                        onContextMenu={memoable ? (e) => openMemo(e, id, f) : undefined}
+                        title={memoable ? '우클릭으로 출고 메모' : undefined}>
+                        <input key={ek(f)} className="edit" data-id={id} data-f={f}
+                          defaultValue={toN(d[f]) || ''} onInput={e => onCellInput(e, id, f)} />
+                        {mc > 0 && <span className="memo-dot" title={mc + '개 메모'}>{mc}</span>}
+                      </td>
+                    );
+                  })}
                   <td className={tdCls(17, 'br')} {...tdProps(17)}>
                     <input key={ek('dc_rate')} className="edit" data-id={id} data-f="dc_rate"
                       defaultValue={toN(d.dc_rate) || ''} onInput={e => onCellInput(e, id, 'dc_rate')} />
@@ -933,6 +978,38 @@ export default function Page() {
           <div key={t.id} className={`toast t-${t.type}${t.show ? ' show' : ''}`}>{t.msg}</div>
         ))}
       </div>
+
+      {memoModal && (() => {
+        const d = byId.current.get(memoModal.id) || {};
+        const list = (memoModal.items || []).filter(x => x.channel === memoModal.channel);
+        return (
+          <div className="memo-backdrop" onClick={() => setMemoModal(null)}>
+            <div className="memo-box" onClick={e => e.stopPropagation()}>
+              <div className="memo-head">
+                <b>{memoModal.label} 출고 메모</b>
+                <span className="memo-sub">{d.brand} {d.pattern} {d.size}</span>
+                <button className="memo-x" onClick={() => setMemoModal(null)}>✕</button>
+              </div>
+              <div className="memo-list">
+                {memoModal.items === null && <div className="memo-empty">불러오는 중…</div>}
+                {memoModal.items !== null && list.length === 0 && <div className="memo-empty">아직 메모가 없습니다</div>}
+                {list.map(it => (
+                  <div className="memo-item" key={it.id}>
+                    <div className="memo-meta">{it.at} · {it.user_id}</div>
+                    <div className="memo-text">{it.memo}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="memo-input">
+                <textarea placeholder="예: 스토어팜 4개 / 직거래 4개" value={memoModal.text}
+                  onChange={e => setMemoModal(m => (m ? { ...m, text: e.target.value } : m))}
+                  onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveMemo(); }} autoFocus />
+                <button className="btn memo-save" onClick={saveMemo}>메모 추가 (Ctrl+Enter)</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </>
   );
 }
