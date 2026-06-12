@@ -88,6 +88,9 @@ export default function Page() {
   const [onlySales, setOnlySales] = useState(false);
   const [sortInfo, setSortInfo] = useState({ idx: null, dir: true });
   const [viewStart, setViewStart] = useState(0);
+  const [user, setUser] = useState('');
+  const userRef = useRef('');
+  userRef.current = user;
 
   // 변하지 않는 참조들
   const DB         = useRef([]);
@@ -164,7 +167,7 @@ export default function Page() {
     fetch('/api/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updates }),
+      body: JSON.stringify({ updates, user: userRef.current || '미지정' }),
       signal: ctrl.signal,
     })
       .then(r => r.json())
@@ -251,6 +254,7 @@ export default function Page() {
 
   // ── 마운트 ─────────────────────────────────
   useEffect(() => {
+    try { setUser(localStorage.getItem('TIRE_USER') || ''); } catch (e) {}
     load();
     measureRowH();
 
@@ -281,7 +285,7 @@ export default function Page() {
       try {
         fetch('/api/batch', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ updates }), keepalive: true,
+          body: JSON.stringify({ updates, user: userRef.current || '미지정' }), keepalive: true,
         });
         crashClear();
       } catch (ex) { syncCrashSave(); }
@@ -527,7 +531,7 @@ export default function Page() {
       const r = await fetch('/api/rows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count }),
+        body: JSON.stringify({ count, user: userRef.current || '미지정' }),
       });
       const res = await r.json();
       if (!res.ok) throw new Error(res.msg || '오류');
@@ -603,6 +607,12 @@ export default function Page() {
           value={kw}
           onChange={e => { setKw(e.target.value); setViewStart(0); if (containerRef.current) containerRef.current.scrollTop = 0; }}
         />
+        <label className="chk-area" title="사용기록에 남을 이름/아이디">
+          사용자
+          <input value={user} placeholder="이름"
+            onChange={e => { setUser(e.target.value); try { localStorage.setItem('TIRE_USER', e.target.value); } catch (err) {} }}
+            style={{ width: 64, border: '1px solid #cbd5e0' }} />
+        </label>
         <label className="chk-area">
           <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} /> 품절포함
         </label>
