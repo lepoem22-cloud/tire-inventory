@@ -173,7 +173,12 @@ export default function Page() {
         if (!res.ok) return fail(res.msg || '오류', false);
         isSending.current = false;
         crashClear();
-        setStatus({ msg: '저장됨', cls: 'ok' });
+        if (typeof res.updated === 'number' && res.updated < updates.length) {
+          setStatus({ msg: '일부 저장 안 됨', cls: 'err' });
+          toast(`${updates.length - res.updated}건이 저장되지 않았습니다 — app/api/batch/route.js 파일이 최신 버전인지 확인하세요`, 'err', 5000);
+        } else {
+          setStatus({ msg: '저장됨', cls: 'ok' });
+        }
         if (!filterRef.current.showAll && updates.some(u => u.field === 'qty')) rerender();
         if (pending.current.size > 0) sendBatch();
       })
@@ -311,7 +316,7 @@ export default function Page() {
       const c = containerRef.current;
       if (!c) return;
       const ns = Math.floor(c.scrollTop / rowH.current);
-      setViewStart(v => (Math.abs(ns - v) > 5 ? ns : v));
+      setViewStart(v => (ns !== v ? ns : v));
     });
   }, []);
 
@@ -576,8 +581,10 @@ export default function Page() {
   filteredRef.current = filtered;
 
   const total = filtered.length;
-  const start = Math.max(0, Math.min(viewStart, Math.max(0, total - 1)));
-  const end = Math.min(total, start + viewRows.current);
+  const OVERSCAN = 15; // 빠른 휠 스크롤 대비 위아래 여유 행
+  const anchor = Math.max(0, Math.min(viewStart, Math.max(0, total - 1)));
+  const start = Math.max(0, anchor - OVERSCAN);
+  const end = Math.min(total, anchor + viewRows.current + OVERSCAN);
   const visible = filtered.slice(start, end);
 
   // ═════════════════════════════════════════
