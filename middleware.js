@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server';
-import crypto from 'crypto';
 
 const COOKIE = 'tire_session';
-const SECRET = process.env.AUTH_SECRET || 'tire-default-secret-change-me';
 
-function valid(token) {
-  if (!token || !token.includes('.')) return false;
-  const [body, mac] = token.split('.');
-  const expect = crypto.createHmac('sha256', SECRET).update(body).digest('base64url');
-  return mac === expect;
+// Edge 런타임에서는 Node 'crypto'를 쓸 수 없으므로,
+// 미들웨어에서는 쿠키 존재(형식)만 확인하고
+// 실제 서명 검증은 각 API/페이지의 currentUser()에서 수행한다.
+function looksValid(token) {
+  return typeof token === 'string' && token.includes('.') && token.length > 20;
 }
 
 export function middleware(req) {
@@ -22,7 +20,7 @@ export function middleware(req) {
     return NextResponse.next();
   }
   const token = req.cookies.get(COOKIE)?.value;
-  if (!valid(token)) {
+  if (!looksValid(token)) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ ok: false, msg: '로그인이 필요합니다' }, { status: 401 });
     }
