@@ -115,6 +115,7 @@ export default function Page() {
   // ── 셀 범위 선택 상태 ──
   const [sel, setSel] = useState(null); // {aRow,aCol,bRow,bCol} (filtered 인덱스, 헤더열 인덱스)
   const selecting = useRef(false);
+  const dragOrigin = useRef(null);
   const selRef = useRef(null);
   selRef.current = sel;
 
@@ -602,31 +603,37 @@ export default function Page() {
   }, [selNorm]);
 
   const onCellMouseDown = useCallback((e, rowIdx, colIdx) => {
-    // 입력칸 안을 클릭하면 편집 모드 → 선택 시작 안 함 (단 Shift는 범위확장)
     const isInput = e.target.tagName === 'INPUT';
+    // Shift+클릭: 기존 선택에서 범위 확장
     if (e.shiftKey && selRef.current) {
       e.preventDefault();
       setSel(s => ({ ...s, bRow: rowIdx, bCol: colIdx }));
       return;
     }
-    if (isInput) {
-      // 단일 셀 선택만 기록(드래그 대비), 편집은 그대로 허용
-      setSel({ aRow: rowIdx, aCol: colIdx, bRow: rowIdx, bCol: colIdx });
-      selecting.current = false;
-      return;
-    }
-    e.preventDefault();
-    selecting.current = true;
+    // 어느 칸이든 일단 시작점 기록하고 드래그 감지 대기.
+    // 입력칸이면 편집도 허용하되, 다른 칸으로 드래그가 시작되면 영역 선택으로 전환.
     setSel({ aRow: rowIdx, aCol: colIdx, bRow: rowIdx, bCol: colIdx });
+    selecting.current = true;
+    dragOrigin.current = { rowIdx, colIdx, isInput };
+    // 입력칸이 아니면 텍스트 선택 방지
+    if (!isInput) e.preventDefault();
   }, []);
 
   const onCellMouseEnter = useCallback((rowIdx, colIdx) => {
     if (!selecting.current) return;
+    const o = dragOrigin.current;
+    // 다른 칸으로 넘어온 순간 = 진짜 드래그 → 영역 선택. 입력 포커스 해제.
+    if (o && (o.rowIdx !== rowIdx || o.colIdx !== colIdx)) {
+      if (o.isInput && document.activeElement && document.activeElement.tagName === 'INPUT') {
+        document.activeElement.blur();
+      }
+      o.isInput = false; // 이후로는 선택 모드 유지
+    }
     setSel(s => (s ? { ...s, bRow: rowIdx, bCol: colIdx } : s));
   }, []);
 
   useEffect(() => {
-    const up = () => { selecting.current = false; };
+    const up = () => { selecting.current = false; dragOrigin.current = null; };
     window.addEventListener('mouseup', up);
     return () => window.removeEventListener('mouseup', up);
   }, []);
@@ -764,6 +771,14 @@ export default function Page() {
         <span className="user-badge" title={isAdmin ? '관리자' : '직원'}>
           {isAdmin ? '👑 ' : '👤 '}{myName || '…'}
         </span>
+        {(() => {
+          const n = selNorm(sel);
+          if (!n) return null;
+          const rows = n.r1 - n.r0 + 1, cols = n.c1 - n.c0 + 1;
+          if (rows * cols <= 1) return null;
+          const cnt = SELECTABLE_COLS.filter(c => c >= n.c0 && c <= n.c1).length * rows;
+          return <span className="sel-badge">선택 {rows}×{cols} · Delete로 {cnt}칸 삭제</span>;
+        })()}
         <select value={brand} onChange={e => { setBrand(e.target.value); setViewStart(0); if (containerRef.current) containerRef.current.scrollTop = 0; }}>
           <option value="">전체 브랜드</option>
           {brands.map(x => <option key={x} value={x}>{x}</option>)}
