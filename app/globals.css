@@ -76,3 +76,6 @@ body{margin-left:28px}
 .login-box button{padding:10px;background:#3182ce;color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer}
 .login-box button:disabled{background:#a0aec0}
 .login-err{color:#c53030;font-size:12px;text-align:center;font-weight:bold}
+
+/* 로그인 사용자 배지 */
+.user-badge{display:inline-flex;align-items:center;font-weight:bold;background:#1a202c;color:#fff;padding:4px 10px;border-radius:14px;font-size:11px;white-space:nowrap}

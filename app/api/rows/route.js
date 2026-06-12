@@ -20,12 +20,6 @@ export async function POST(req) {
       const { rows } = await sql`INSERT INTO tires DEFAULT VALUES RETURNING *`;
       items.push(rows[0]);
     }
-    try {
-      await sql.query(
-        `INSERT INTO edit_log (user_id, field, value) VALUES ($1, '행추가', $2)`,
-        [me.id, String(items.length) + '행']
-      );
-    } catch (e) {}
     return NextResponse.json({ ok: true, items });
   } catch (e) {
     return NextResponse.json({ ok: false, msg: e.message }, { status: 500 });

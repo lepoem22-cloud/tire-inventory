@@ -92,6 +92,7 @@ export default function Page() {
   const [sortInfo, setSortInfo] = useState({ idx: null, dir: true });
   const [viewStart, setViewStart] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [myName, setMyName] = useState('');
 
   // 변하지 않는 참조들
   const DB         = useRef([]);
@@ -232,6 +233,7 @@ export default function Page() {
       .then(r => r.json())
       .then(res => {
         if (!res.ok) throw new Error(res.msg || '오류');
+        if (res.me) { setIsAdmin(res.me.role === 'admin'); setMyName(res.me.id || ''); }
         if (activeEdit.current || Date.now() - lastEdit.current < EDIT_GUARD_MS) { setStatus({ msg: '준비', cls: 'ok' }); return; }
         DB.current = res.items || [];
         byId.current.clear();
@@ -241,6 +243,7 @@ export default function Page() {
           byId.current.set(d.id, d);
           if (!calcMap.current.has(d.id)) calcMap.current.set(d.id, { t: '', u: toN(d.factory) });
         }
+        try { sessionStorage.setItem('TIRE_CACHE', JSON.stringify(res.items || [])); } catch (e) {}
         setEpoch(e => e + 1);
         setStatus({ msg: '준비', cls: 'ok' });
         crashRecover();
@@ -260,10 +263,25 @@ export default function Page() {
 
   // ── 마운트 ─────────────────────────────────
   useEffect(() => {
-    fetch('/api/auth/me').then(r => r.json()).then(res => {
-      if (res.ok) setIsAdmin(res.role === 'admin');
-    }).catch(() => {});
-    load();
+    // 캐시가 있으면 먼저 즉시 그려서 체감 속도 향상 (서버 응답 오면 갱신됨)
+    try {
+      const cached = sessionStorage.getItem('TIRE_CACHE');
+      if (cached) {
+        const items = JSON.parse(cached);
+        if (Array.isArray(items) && items.length) {
+          DB.current = items;
+          byId.current.clear();
+          for (const d of DB.current) {
+            d.brandLower = String(d.brand || '').toLowerCase();
+            d.key = normKey(d.pcode + d.pattern + d.dot) + normKey(d.size);
+            byId.current.set(d.id, d);
+            if (!calcMap.current.has(d.id)) calcMap.current.set(d.id, { t: '', u: toN(d.factory) });
+          }
+          setEpoch(e => e + 1);
+        }
+      }
+    } catch (e) {}
+    load(); // me 정보도 이 응답에 포함됨
     measureRowH();
 
     // 매일 8시 자동 새로고침
@@ -743,6 +761,9 @@ export default function Page() {
   return (
     <>
       <div className="nav">
+        <span className="user-badge" title={isAdmin ? '관리자' : '직원'}>
+          {isAdmin ? '👑 ' : '👤 '}{myName || '…'}
+        </span>
         <select value={brand} onChange={e => { setBrand(e.target.value); setViewStart(0); if (containerRef.current) containerRef.current.scrollTop = 0; }}>
           <option value="">전체 브랜드</option>
           {brands.map(x => <option key={x} value={x}>{x}</option>)}
