@@ -1,0 +1,22 @@
+import { NextResponse } from 'next/server';
+import { sql, ensureSchema } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req) {
+  try {
+    await ensureSchema();
+    const body = await req.json();
+    let count = Math.trunc(Number(body.count) || 1);
+    if (count < 1) count = 1;
+    if (count > 500) count = 500;
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const { rows } = await sql`INSERT INTO tires DEFAULT VALUES RETURNING *`;
+      items.push(rows[0]);
+    }
+    return NextResponse.json({ ok: true, items });
+  } catch (e) {
+    return NextResponse.json({ ok: false, msg: e.message }, { status: 500 });
+  }
+}
