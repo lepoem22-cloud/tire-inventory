@@ -760,6 +760,28 @@ export default function Page() {
     });
   }, [toast]);
 
+  const deleteMemo = useCallback((memoId) => {
+    setMemoModal(m => {
+      if (!m) return m;
+      const tid = m.id, ch = m.channel;
+      fetch(`/api/memo?memoId=${memoId}&id=${tid}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(res => {
+          if (!res.ok) { toast('삭제 실패: ' + (res.msg || ''), 'err'); return; }
+          const d = byId.current.get(tid);
+          if (d) {
+            d.memoCount = { ...(d.memoCount || {}) };
+            d.memoCount[ch] = (res.items || []).filter(x => x.channel === ch).length;
+            setEpoch(x => x + 1);
+          }
+          setMemoModal(cur => (cur && cur.id === tid ? { ...cur, items: res.items || [] } : cur));
+          toast('메모 삭제됨', 'save', 1200);
+        })
+        .catch(err => toast('삭제 실패: ' + (err.message || ''), 'err'));
+      return m;
+    });
+  }, [toast]);
+
   // ── 정렬 ───────────────────────────────────
   const doSort = useCallback((i) => {
     const k = HDR[i] && HDR[i].k;
@@ -792,6 +814,14 @@ export default function Page() {
   for (const d of DB.current) if (d.brand) brandSet.add(d.brand);
   const brands = [...brandSet].sort();
   filteredRef.current = filtered;
+
+  // ── 합계 (현재 필터된 행 전체 기준) ──
+  const sums = { change: 0, mount: 0, direct: 0, daily_del: 0, ping_del: 0, ping_dir: 0, store11: 0, storefarm: 0, lotte: 0 };
+  for (const d of filtered) {
+    const s = salesOf(d);
+    if (toN(d.qty)) sums.change += toN(d.qty) - s;
+    for (const f of SALES_FIELDS) sums[f] += toN(d[f]);
+  }
 
   const total = filtered.length;
   const OVERSCAN = 15; // 빠른 휠 스크롤 대비 위아래 여유 행
@@ -970,6 +1000,16 @@ export default function Page() {
               <tr style={{ height: (total - end) * rowH.current }}><td colSpan={HDR.length}></td></tr>
             )}
           </tbody>
+          <tfoot>
+            <tr className="sum-row">
+              <td colSpan={8} className="sum-label">합계 ({filtered.length}개 품목)</td>
+              <td className="sum-val bi">{sums.change || ''}</td>
+              {SALES_FIELDS.map((f, fi) => (
+                <td key={f} className="sum-val" style={{ background: JQ_BG[fi] }}>{sums[f] || ''}</td>
+              ))}
+              <td colSpan={5}></td>
+            </tr>
+          </tfoot>
         </table>
       </div>
 
@@ -995,6 +1035,7 @@ export default function Page() {
                 {memoModal.items !== null && list.length === 0 && <div className="memo-empty">아직 메모가 없습니다</div>}
                 {list.map(it => (
                   <div className="memo-item" key={it.id}>
+                    <button className="memo-del" title="이 메모 삭제" onClick={() => deleteMemo(it.id)}>✕</button>
                     <div className="memo-meta">{it.at} · {it.user_id}</div>
                     <div className="memo-text">{it.memo}</div>
                   </div>

@@ -101,3 +101,23 @@ body{margin-left:28px}
 .memo-input{padding:10px 14px;border-top:1px solid #e2e8f0;display:flex;flex-direction:column;gap:6px}
 .memo-input textarea{width:100%;height:54px;border:1px solid #cbd5e0;border-radius:6px;padding:6px;font-size:12px;font-family:inherit;box-sizing:border-box;resize:vertical}
 .memo-save{background:#dd6b20;color:#fff;border-color:#dd6b20;font-weight:bold}
+
+/* ── 합계 행 (하단 고정) ── */
+tfoot .sum-row td{position:sticky;bottom:0;background:#1a202c;color:#fff;font-weight:900;font-size:12px;z-index:6;border-top:2px solid #2b6cb0}
+tfoot .sum-label{text-align:right;padding-right:10px;background:#1a202c;color:#cbd5e0;font-size:11px}
+tfoot .sum-val{color:#fff}
+tfoot .sum-val.bi{color:#fbd38d}
+
+/* ── 메모 개별 삭제 버튼 ── */
+.memo-item{position:relative}
+.memo-del{position:absolute;top:4px;right:4px;border:none;background:none;color:#a0aec0;font-size:11px;cursor:pointer;line-height:1}
+.memo-del:hover{color:#e53e3e}
+
+/* ── 모바일: I(변동)까지 보이게 ── */
+@media(max-width:900px){
+  body{margin:6px 6px 6px 28px;font-size:11px}
+  table{min-width:0!important}
+  /* 좌측 9개 열(A~I)만 표시: 브랜드~변동, 나머지는 좌우 스크롤로 */
+  .nav{gap:4px}
+  .nav select,.nav input{font-size:11px}
+}
