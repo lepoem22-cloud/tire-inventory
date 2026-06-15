@@ -472,7 +472,7 @@ export default function Page() {
   // 비관리자가 수정할 수 없는 A~H 필드 (붙여넣기에서 건너뜀)
   const ADMIN_ONLY = new Set(['brand', 'pattern', 'pcode', 'size', 'pr', 'dot', 'factory', 'qty']);
 
-  const onPaste = useCallback((e) => {
+  const onPaste = useCallback(async (e) => {
     const el = e.target;
     if (!el.classList || !el.classList.contains('edit')) return;
     const text = (e.clipboardData || window.clipboardData).getData('text');
@@ -484,14 +484,45 @@ export default function Page() {
     const id0 = +el.dataset.id;
     const startCol = FIELD_COL[f0];
     if (startCol == null) { toast('이 칸에는 블록 붙여넣기를 할 수 없습니다', 'warn'); return; }
-    // 붙여넣기 시작 시점의 화면 순서를 즉시 고정(스냅샷)하고, 이후엔 각 행의 고유 id로만 저장.
-    // → 도중에 다른 사람이 입력하거나 필터/정렬이 바뀌어도 항상 같은 행에 안전하게 기록됨.
-    const list = filteredRef.current.slice();
-    const rIdx = list.findIndex(d => d.id === id0);
-    if (rIdx < 0) return;
 
     const lines = text.replace(/\r/g, '').split('\n');
     if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    if (!lines.length) return;
+
+    let list = filteredRef.current.slice();
+    const rIdx = list.findIndex(d => d.id === id0);
+    if (rIdx < 0) return;
+
+    // 시작 행 아래로 남은 행이 붙여넣을 줄 수보다 적으면 → 부족분 자동 행 추가 (관리자만)
+    const need = (rIdx + lines.length) - list.length;
+    if (need > 0) {
+      if (!isAdmin) {
+        toast(`행이 ${need}개 부족합니다 (관리자가 행을 추가해야 합니다)`, 'warn', 3000);
+      } else {
+        try {
+          setStatus({ msg: `행 ${need}개 추가 중…`, cls: 'saving' });
+          const r = await fetch('/api/rows', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ count: need }),
+          });
+          const res = await r.json();
+          if (!res.ok) throw new Error(res.msg || '오류');
+          for (const d of res.items) {
+            d.brandLower = ''; d.key = ''; d.memoCount = {};
+            DB.current.push(d);
+            byId.current.set(d.id, d);
+            calcMap.current.set(d.id, { t: '', u: 0 });
+          }
+          setShowAll(true);
+          try { sessionStorage.removeItem('TIRE_CACHE'); } catch (er) {}
+          list = list.concat(res.items);
+        } catch (err) {
+          setStatus({ msg: '행 추가 실패', cls: 'err' });
+          toast('자동 행 추가 실패: ' + (err.message || ''), 'err', 3000);
+          return;
+        }
+      }
+    }
 
     let applied = 0, skippedAdmin = 0;
     lines.forEach((line, i) => {
@@ -499,8 +530,8 @@ export default function Page() {
       if (!d) return;
       line.split('\t').forEach((val, j) => {
         const fld = COL_FIELD[startCol + j];
-        if (!fld) return; // 계산 열은 칸 수만 차지하고 건너뜀
-        if (!isAdmin && ADMIN_ONLY.has(fld)) { skippedAdmin++; return; } // 권한 없는 열 건너뜀
+        if (!fld) return;
+        if (!isAdmin && ADMIN_ONLY.has(fld)) { skippedAdmin++; return; }
         const v = TEXT_SET.has(fld) ? String(val).trim() : String(val).replace(/[^0-9.-]/g, '');
         d[fld] = v;
         pending.current.set(d.id + '_' + fld, { id: d.id, field: fld, value: v, el: null });
@@ -514,7 +545,7 @@ export default function Page() {
     }
     lastEdit.current = Date.now();
     syncCrashSave();
-    setEpoch(x => x + 1); // 화면 입력칸 값 갱신
+    setEpoch(x => x + 1);
     queueSend();
     toast(`${applied}개 셀 붙여넣음${skippedAdmin ? ` (권한 없는 ${skippedAdmin}칸 제외)` : ''} — 저장 중`, 'save', 2200);
   }, [syncCrashSave, queueSend, toast, isAdmin]);
@@ -651,12 +682,24 @@ export default function Page() {
     }
   }, [pickedRows, toast, invalidateCache]);
 
-  const togglePick = useCallback((id) => {
+  const lastPickIdx = useRef(null);
+  const togglePick = useCallback((id, rowIdx, shiftKey) => {
     setPickedRows(prev => {
       const n = new Set(prev);
-      if (n.has(id)) n.delete(id); else n.add(id);
+      if (shiftKey && lastPickIdx.current != null) {
+        // 마지막 선택 행 ~ 현재 행 사이 전체를 선택 (현재 필터 순서 기준)
+        const list = filteredRef.current;
+        const a = Math.min(lastPickIdx.current, rowIdx);
+        const b = Math.max(lastPickIdx.current, rowIdx);
+        for (let i = a; i <= b; i++) {
+          if (list[i]) n.add(list[i].id);
+        }
+      } else {
+        if (n.has(id)) n.delete(id); else n.add(id);
+      }
       return n;
     });
+    lastPickIdx.current = rowIdx;
   }, []);
 
   // ── 셀 범위 선택 ────────────────────────────
@@ -955,7 +998,7 @@ export default function Page() {
             <button className="btn" style={{ background: '#ebf8ff', borderColor: '#90cdf4', fontWeight: 'bold' }} onClick={() => setAddOpen(o => !o)}>＋ 행 추가</button>
             {addOpen && (
               <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                <input type="number" min="1" max="500" value={addCount}
+                <input type="number" min="1" max="5000" value={addCount}
                   onChange={e => setAddCount(e.target.value)}
                   onKeyUp={e => { if (e.key === 'Enter') addRows(); }}
                   style={{ width: 52 }} autoFocus />
@@ -1023,8 +1066,8 @@ export default function Page() {
                 <tr key={id}>
                   {editMode && (
                     <td style={{ background: pickedRows.has(id) ? '#fed7d7' : '#fff5f5' }}>
-                      <input type="checkbox" checked={pickedRows.has(id)}
-                        onChange={() => togglePick(id)} style={{ cursor: 'pointer' }} />
+                      <input type="checkbox" checked={pickedRows.has(id)} readOnly
+                        onClick={(e) => togglePick(id, rowIdx, e.shiftKey)} style={{ cursor: 'pointer' }} />
                     </td>
                   )}
                   {['brand', 'pattern', 'pcode', 'size', 'pr'].map((f, ci) => (

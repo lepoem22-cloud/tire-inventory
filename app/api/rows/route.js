@@ -14,13 +14,13 @@ export async function POST(req) {
     const body = await req.json();
     let count = Math.trunc(Number(body.count) || 1);
     if (count < 1) count = 1;
-    if (count > 500) count = 500;
-    const items = [];
-    for (let i = 0; i < count; i++) {
-      const { rows } = await sql`INSERT INTO tires DEFAULT VALUES RETURNING *`;
-      items.push(rows[0]);
-    }
-    return NextResponse.json({ ok: true, items });
+    if (count > 5000) count = 5000;
+    // generate_series 로 한 번에 count 개 행 생성 (1행씩 루프보다 훨씬 빠름)
+    const { rows } = await sql.query(
+      `INSERT INTO tires (brand) SELECT '' FROM generate_series(1, $1) RETURNING *`,
+      [count]
+    );
+    return NextResponse.json({ ok: true, items: rows });
   } catch (e) {
     return NextResponse.json({ ok: false, msg: e.message }, { status: 500 });
   }
