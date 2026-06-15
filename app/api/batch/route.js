@@ -54,10 +54,14 @@ export async function POST(req) {
       else if (FLOAT_FIELDS.has(f)) val = toF(u.value);
       else continue;
 
+      // 값이 실제로 바뀐 경우에만 UPDATE + 기록 (변화 없으면 불필요한 기록 방지)
       const { rows } = await sql.query(
-        `UPDATE tires SET ${f} = $1, updated_at = now() WHERE id = $2 RETURNING brand, pattern, size`,
+        `UPDATE tires SET ${f} = $1, updated_at = now()
+         WHERE id = $2 AND ${f} IS DISTINCT FROM $1
+         RETURNING brand, pattern, size`,
         [val, id]
       );
+      if (!rows.length) continue; // 변화 없음 → 기록 안 남김
       n++;
 
       // 사용기록은 H~Q(수량 + 출고 8개)를 수정했을 때만 남김
