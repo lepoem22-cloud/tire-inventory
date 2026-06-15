@@ -103,10 +103,9 @@ body{margin-left:28px}
 .memo-save{background:#dd6b20;color:#fff;border-color:#dd6b20;font-weight:bold}
 
 /* ── 합계 행 (하단 고정) ── */
-tfoot .sum-row td{position:sticky;bottom:0;background:#1a202c;color:#fff;font-weight:900;font-size:12px;z-index:6;border-top:2px solid #2b6cb0}
-tfoot .sum-label{text-align:right;padding-right:10px;background:#1a202c;color:#cbd5e0;font-size:11px}
-tfoot .sum-val{color:#fff}
-tfoot .sum-val.bi{color:#fbd38d}
+tfoot .sum-row td{position:sticky;bottom:0;background:#1a202c!important;color:#fff;font-weight:900;font-size:12px;z-index:6;border-top:2px solid #2b6cb0}
+tfoot .sum-label{text-align:right;padding-right:10px;background:#1a202c!important;color:#cbd5e0;font-size:11px}
+tfoot .sum-val{color:#fff!important;background:#1a202c!important}
 
 /* ── 메모 개별 삭제 버튼 ── */
 .memo-item{position:relative}

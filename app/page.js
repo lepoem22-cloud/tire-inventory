@@ -85,6 +85,8 @@ export default function Page() {
   const [toasts, setToasts] = useState([]);
   // K·L 출고 메모 모달
   const [memoModal, setMemoModal] = useState(null); // {id, channel, label, items, text} | null
+  const memoModalRef = useRef(null);
+  memoModalRef.current = memoModal;
 
   // 필터 state
   const [brand, setBrand] = useState('');
@@ -709,11 +711,18 @@ export default function Page() {
   // 표 전역 키 처리 (선택 영역 복사/삭제)
   useEffect(() => {
     const onKey = (e) => {
+      // 메모 모달이 열려 있으면 표 단축키 무시
+      if (memoModalRef.current) return;
+      const el = document.activeElement;
+      const tag = el && el.tagName;
+      // 표의 셀 입력칸(class=edit) 외의 입력 요소(textarea, 메모 입력 등)에 포커스 중이면 무시
+      const isCellEdit = el && tag === 'INPUT' && el.classList.contains('edit');
+      if ((tag === 'TEXTAREA' || (tag === 'INPUT' && !isCellEdit))) return;
+
       const n = selNorm(selRef.current);
       if (!n) return;
       const multi = n.r0 !== n.r1 || n.c0 !== n.c1;
-      const el = document.activeElement;
-      const editing = el && el.tagName === 'INPUT' && el.classList.contains('edit');
+      const editing = isCellEdit;
       // 복사: 다중 선택이면 입력칸 포커스 중이라도 영역 복사
       if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
         if (multi) { e.preventDefault(); copySelection(); }
@@ -732,6 +741,7 @@ export default function Page() {
   const MEMO_LABEL = { direct: '직배(K)', daily_del: '택배(L)' };
   const openMemo = useCallback((e, id, channel) => {
     e.preventDefault();
+    setSel(null); // 셀 선택 해제 (메모 입력 중 Delete가 셀 삭제로 새는 것 방지)
     setMemoModal({ id, channel, label: MEMO_LABEL[channel] || channel, items: null, text: '' });
     fetch('/api/memo?id=' + id)
       .then(r => r.json())
@@ -1007,9 +1017,9 @@ export default function Page() {
           <tfoot>
             <tr className="sum-row">
               <td colSpan={8} className="sum-label">합계 ({filtered.length}개 품목)</td>
-              <td className="sum-val bi">{sums.change || ''}</td>
+              <td className="sum-val">{sums.change || ''}</td>
               {SALES_FIELDS.map((f, fi) => (
-                <td key={f} className="sum-val" style={{ background: JQ_BG[fi] }}>{sums[f] || ''}</td>
+                <td key={f} className="sum-val">{sums[f] || ''}</td>
               ))}
               <td colSpan={5}></td>
             </tr>
