@@ -1017,9 +1017,9 @@ export default function Page() {
           <tfoot>
             <tr className="sum-row">
               <td colSpan={8} className="sum-label">합계 ({filtered.length}개 품목)</td>
-              <td className="sum-val bi">{sums.change || ''}</td>
+              <td className="sum-val">{sums.change || ''}</td>
               {SALES_FIELDS.map((f, fi) => (
-                <td key={f} className="sum-val" style={{ background: JQ_BG[fi] }}>{sums[f] || ''}</td>
+                <td key={f} className="sum-val">{sums[f] || ''}</td>
               ))}
               <td colSpan={5}></td>
             </tr>
