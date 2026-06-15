@@ -246,7 +246,10 @@ export default function Page() {
           byId.current.set(d.id, d);
           if (!calcMap.current.has(d.id)) calcMap.current.set(d.id, { t: '', u: toN(d.factory) });
         }
-        try { sessionStorage.setItem('TIRE_CACHE', JSON.stringify(res.items || [])); } catch (e) {}
+        try {
+          const slim = (res.items || []).map(({ memoCount, ...rest }) => rest);
+          sessionStorage.setItem('TIRE_CACHE', JSON.stringify(slim));
+        } catch (e) {}
         setEpoch(e => e + 1);
         setStatus({ msg: '준비', cls: 'ok' });
         crashRecover();
@@ -275,6 +278,7 @@ export default function Page() {
           DB.current = items;
           byId.current.clear();
           for (const d of DB.current) {
+            d.memoCount = {}; // 캐시의 메모 개수는 신뢰하지 않음 (서버 응답으로만 갱신)
             d.brandLower = String(d.brand || '').toLowerCase();
             d.key = normKey(d.pcode + d.pattern + d.dot) + normKey(d.size);
             byId.current.set(d.id, d);

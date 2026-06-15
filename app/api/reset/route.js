@@ -37,7 +37,7 @@ async function runReset() {
           ) AS notes
         FROM ship_memo GROUP BY tire_pk
       ) m ON m.tire_pk = t.id
-      WHERE ${SALES_SUM_T} > 0
+      WHERE ${SALES_SUM_T} > 0 OR m.notes IS NOT NULL
     `);
     backed = r.rowCount || 0;
   } catch (e) {
