@@ -15,8 +15,8 @@ const FLOAT_FIELDS = new Set(['dc_rate']);
 // A~H열 = 관리자만 수정 가능 (브랜드~수량)
 const ADMIN_ONLY = new Set(['brand', 'pattern', 'pcode', 'size', 'pr', 'dot', 'factory', 'qty']);
 
-// 사용기록을 남길 필드: H(수량) + J~Q(출고 8개)
-const LOGGED_FIELDS = new Set(['qty', 'mount', 'direct', 'daily_del', 'ping_del', 'ping_dir', 'store11', 'storefarm', 'lotte']);
+// 사용기록을 남길 필드: 출고 8개(J~Q)만. 수량(H)·재고 채우기는 추적 대상 아님
+const LOGGED_FIELDS = new Set(['mount', 'direct', 'daily_del', 'ping_del', 'ping_dir', 'store11', 'storefarm', 'lotte']);
 
 function toN(v) {
   const n = Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
