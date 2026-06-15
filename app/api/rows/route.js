@@ -25,3 +25,35 @@ export async function POST(req) {
     return NextResponse.json({ ok: false, msg: e.message }, { status: 500 });
   }
 }
+
+// 행 삭제 (관리자만). body: { ids: [1,2,3] }  또는  { all: true } 전체 삭제
+export async function DELETE(req) {
+  try {
+    await ensureSchema();
+    const me = currentUser();
+    if (!me) return NextResponse.json({ ok: false, msg: '로그인이 필요합니다' }, { status: 401 });
+    if (me.role !== 'admin') return NextResponse.json({ ok: false, msg: '행 삭제는 관리자만 가능합니다' }, { status: 403 });
+
+    const body = await req.json().catch(() => ({}));
+
+    if (body.all === true) {
+      // 전체 삭제 + id 시퀀스 리셋 (다음 추가 시 1번부터)
+      await sql`TRUNCATE TABLE tires RESTART IDENTITY`;
+      return NextResponse.json({ ok: true, deleted: 'all' });
+    }
+
+    const ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Boolean) : [];
+    if (!ids.length) return NextResponse.json({ ok: false, msg: '삭제할 행이 없습니다' }, { status: 400 });
+
+    const r = await sql.query(
+      `DELETE FROM tires WHERE id = ANY($1::int[])`,
+      [ids]
+    );
+    // 해당 행들의 출고 메모도 정리
+    try { await sql.query(`DELETE FROM ship_memo WHERE tire_pk = ANY($1::int[])`, [ids]); } catch (e) {}
+
+    return NextResponse.json({ ok: true, deleted: r.rowCount || 0 });
+  } catch (e) {
+    return NextResponse.json({ ok: false, msg: e.message }, { status: 500 });
+  }
+}

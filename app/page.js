@@ -564,6 +564,8 @@ export default function Page() {
 
   // ── 행 추가 (인라인 입력, prompt 미사용) ──────
   const [addOpen, setAddOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);   // 관리자 행 편집 모드
+  const [pickedRows, setPickedRows] = useState(() => new Set()); // 삭제용 선택된 행 id
   const [addCount, setAddCount] = useState('10');
   const addRows = useCallback(async () => {
     const count = Math.trunc(Number(addCount) || 0);
@@ -586,6 +588,7 @@ export default function Page() {
         calcMap.current.set(d.id, { t: '', u: 0 });
       }
       setShowAll(true); // 새 행은 수량 0이라 품절포함 켜야 보임
+      try { sessionStorage.removeItem('TIRE_CACHE'); } catch (e) {}
       setEpoch(e => e + 1);
       setStatus({ msg: '준비', cls: 'ok' });
       toast(`${res.items.length}행 추가됨 — 「품절포함」 상태로 표시 중`, 'save', 2500);
@@ -594,6 +597,67 @@ export default function Page() {
       toast('행 추가 실패: ' + e.message, 'err', 3000);
     }
   }, [addCount, toast]);
+
+  // ── 행 삭제 (편집모드, 관리자) ──────────────
+  const invalidateCache = useCallback(() => {
+    try { sessionStorage.removeItem('TIRE_CACHE'); } catch (e) {}
+  }, []);
+
+  const deleteAllRows = useCallback(async () => {
+    if (!window.confirm('모든 행을 영구 삭제합니다. 되돌릴 수 없습니다.\n정말 전체 삭제할까요?')) return;
+    if (!window.confirm('한 번 더 확인합니다. 정말로 전부 지웁니까?')) return;
+    setStatus({ msg: '전체 삭제 중…', cls: 'saving' });
+    try {
+      const r = await fetch('/api/rows', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      });
+      const res = await r.json();
+      if (!res.ok) throw new Error(res.msg || '오류');
+      DB.current = []; byId.current.clear(); calcMap.current.clear();
+      setPickedRows(new Set());
+      invalidateCache();
+      setEpoch(e => e + 1);
+      setStatus({ msg: '전체 삭제됨', cls: 'ok' });
+      toast('모든 행이 삭제되었습니다', 'save', 2500);
+    } catch (e) {
+      setStatus({ msg: '삭제 실패', cls: 'err' });
+      toast('삭제 실패: ' + e.message, 'err', 3000);
+    }
+  }, [toast, invalidateCache]);
+
+  const deletePickedRows = useCallback(async () => {
+    const ids = [...pickedRows];
+    if (!ids.length) { toast('삭제할 행을 선택하세요', 'warn'); return; }
+    if (!window.confirm(`선택한 ${ids.length}개 행을 삭제합니다. 진행할까요?`)) return;
+    setStatus({ msg: '삭제 중…', cls: 'saving' });
+    try {
+      const r = await fetch('/api/rows', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const res = await r.json();
+      if (!res.ok) throw new Error(res.msg || '오류');
+      DB.current = DB.current.filter(d => !pickedRows.has(d.id));
+      for (const id of ids) { byId.current.delete(id); calcMap.current.delete(id); }
+      setPickedRows(new Set());
+      invalidateCache();
+      setEpoch(e => e + 1);
+      setStatus({ msg: '삭제됨', cls: 'ok' });
+      toast(`${res.deleted}개 행 삭제됨`, 'save', 2000);
+    } catch (e) {
+      setStatus({ msg: '삭제 실패', cls: 'err' });
+      toast('삭제 실패: ' + e.message, 'err', 3000);
+    }
+  }, [pickedRows, toast, invalidateCache]);
+
+  const togglePick = useCallback((id) => {
+    setPickedRows(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }, []);
 
   // ── 셀 범위 선택 ────────────────────────────
   const selNorm = useCallback((sv) => {
@@ -878,16 +942,32 @@ export default function Page() {
         <button className="btn" onClick={() => setSortInfo({ idx: null, dir: true })}>정렬초기화</button>
         <button className="btn" title="다른 사람이 입력한 최신 내용 불러오기"
           onClick={() => { lastEdit.current = 0; activeEdit.current = null; load(); }}>↻ 새로고침</button>
-        <button className="btn" style={{ background: '#ebf8ff', borderColor: '#90cdf4', fontWeight: 'bold' }} onClick={() => setAddOpen(o => !o)}>＋ 행 추가</button>
-        {addOpen && (
-          <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-            <input type="number" min="1" max="500" value={addCount}
-              onChange={e => setAddCount(e.target.value)}
-              onKeyUp={e => { if (e.key === 'Enter') addRows(); }}
-              style={{ width: 52 }} autoFocus />
-            <button className="btn" style={{ background: '#c6f6d5', borderColor: '#9ae6b4', fontWeight: 'bold' }} onClick={addRows}>확인</button>
-            <button className="btn" onClick={() => setAddOpen(false)}>취소</button>
-          </span>
+        {isAdmin && (
+          <button className="btn" style={editMode
+            ? { background: '#fed7d7', borderColor: '#fc8181', fontWeight: 'bold', color: '#822727' }
+            : { background: '#edf2f7', fontWeight: 'bold' }}
+            onClick={() => { setEditMode(m => !m); setPickedRows(new Set()); }}>
+            {editMode ? '✓ 편집모드 끄기' : '✎ 편집모드'}
+          </button>
+        )}
+        {isAdmin && editMode && (
+          <>
+            <button className="btn" style={{ background: '#ebf8ff', borderColor: '#90cdf4', fontWeight: 'bold' }} onClick={() => setAddOpen(o => !o)}>＋ 행 추가</button>
+            {addOpen && (
+              <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                <input type="number" min="1" max="500" value={addCount}
+                  onChange={e => setAddCount(e.target.value)}
+                  onKeyUp={e => { if (e.key === 'Enter') addRows(); }}
+                  style={{ width: 52 }} autoFocus />
+                <button className="btn" style={{ background: '#c6f6d5', borderColor: '#9ae6b4', fontWeight: 'bold' }} onClick={addRows}>확인</button>
+                <button className="btn" onClick={() => setAddOpen(false)}>취소</button>
+              </span>
+            )}
+            <button className="btn" style={{ background: '#fff5f5', borderColor: '#fc8181', color: '#c53030', fontWeight: 'bold' }}
+              onClick={deletePickedRows}>🗑 선택 삭제{pickedRows.size ? ` (${pickedRows.size})` : ''}</button>
+            <button className="btn" style={{ background: '#742a2a', borderColor: '#742a2a', color: '#fff', fontWeight: 'bold' }}
+              onClick={deleteAllRows}>전체 삭제</button>
+          </>
         )}
         <div className="mobile-hint">좌우 스크롤로 전체 열 확인</div>
         <div id="status" className={status.cls}>{status.msg}</div>
@@ -897,6 +977,9 @@ export default function Page() {
         <table>
           <thead>
             <tr>
+              {editMode && (
+                <th style={{ width: 30, background: '#fed7d7' }} title="삭제할 행 선택">✓</th>
+              )}
               {HDR.map((h, i) => (
                 <th key={h.n} style={{ width: h.w, ...(h.bg ? { background: h.bg } : {}) }}
                     className={h.cls || ''} onClick={() => doSort(i)}>
@@ -915,11 +998,11 @@ export default function Page() {
             onCompositionEnd={onCompositionEnd}
           >
             {start > 0 && (
-              <tr style={{ height: start * rowH.current }}><td colSpan={HDR.length}></td></tr>
+              <tr style={{ height: start * rowH.current }}><td colSpan={HDR.length + (editMode ? 1 : 0)}></td></tr>
             )}
             {total === 0 && (
               <tr>
-                <td colSpan={HDR.length} style={{ padding: '30px 0', color: '#718096', fontWeight: 'bold' }}>
+                <td colSpan={HDR.length + (editMode ? 1 : 0)} style={{ padding: '30px 0', color: '#718096', fontWeight: 'bold' }}>
                   표시할 데이터가 없습니다 — 위의 「＋ 행 추가」로 빈 행을 만들거나 「품절포함」을 체크하세요
                 </td>
               </tr>
@@ -938,6 +1021,12 @@ export default function Page() {
               });
               return (
                 <tr key={id}>
+                  {editMode && (
+                    <td style={{ background: pickedRows.has(id) ? '#fed7d7' : '#fff5f5' }}>
+                      <input type="checkbox" checked={pickedRows.has(id)}
+                        onChange={() => togglePick(id)} style={{ cursor: 'pointer' }} />
+                    </td>
+                  )}
                   {['brand', 'pattern', 'pcode', 'size', 'pr'].map((f, ci) => (
                     <td key={f} className={tdCls(ci)} {...tdProps(ci)}>
                       {isAdmin
@@ -954,8 +1043,9 @@ export default function Page() {
                   </td>
                   <td className={tdCls(6)} {...tdProps(6)}>
                     {isAdmin
-                      ? <input key={ek('factory')} className="edit" data-id={id} data-f="factory"
-                          defaultValue={toN(d.factory) || ''} onInput={e => onCellInput(e, id, 'factory')} />
+                      ? <span className="won-wrap"><span className="won-mark">₩</span>
+                          <input key={ek('factory')} className="edit won-input" data-id={id} data-f="factory"
+                            defaultValue={toN(d.factory) || ''} onInput={e => onCellInput(e, id, 'factory')} /></span>
                       : <span className="ro-txt">{toN(d.factory) ? '₩'+toN(d.factory).toLocaleString() : ''}</span>}
                   </td>
                   <td className={tdCls(7)} {...tdProps(7)}>
@@ -998,12 +1088,12 @@ export default function Page() {
               );
             })}
             {end < total && (
-              <tr style={{ height: (total - end) * rowH.current }}><td colSpan={HDR.length}></td></tr>
+              <tr style={{ height: (total - end) * rowH.current }}><td colSpan={HDR.length + (editMode ? 1 : 0)}></td></tr>
             )}
           </tbody>
           <tfoot>
             <tr className="sum-row">
-              <td colSpan={8} className="sum-label">합계 ({filtered.length}개 품목)</td>
+              <td colSpan={editMode ? 9 : 8} className="sum-label">합계 ({filtered.length}개 품목)</td>
               <td className="sum-val">{sums.change || ''}</td>
               {SALES_FIELDS.map((f, fi) => (
                 <td key={f} className="sum-val">{sums[f] || ''}</td>

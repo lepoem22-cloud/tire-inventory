@@ -134,3 +134,8 @@ tfoot .sum-val{color:#fff!important;background:#1a202c!important}
   th:nth-child(8),td:nth-child(8){width:34px!important}
   th:nth-child(9),td:nth-child(9){width:34px!important}
 }
+
+/* 공장가 ₩ 표시 (입력칸 앞 고정) */
+.won-wrap{display:flex;align-items:center;justify-content:center;gap:1px}
+.won-mark{color:#718096;font-size:10px;font-weight:bold;flex:none}
+.won-input{width:78%!important}
