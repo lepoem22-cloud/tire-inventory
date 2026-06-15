@@ -49,6 +49,11 @@ export default function BackupPage() {
     lastIdx.current = idx;
   };
 
+  const allPicked = shown.length > 0 && shown.every(it => picked.has(it.id));
+  const toggleAll = () => {
+    setPicked(() => (allPicked ? new Set() : new Set(shown.map(it => it.id))));
+  };
+
   const delPicked = async () => {
     const ids = [...picked];
     if (!ids.length) { alert('삭제할 항목을 선택하세요'); return; }
@@ -79,6 +84,7 @@ export default function BackupPage() {
         <button className="btn" onClick={load}>새로고침</button>
         {isAdmin && (
           <>
+            <button className="btn" onClick={toggleAll}>{allPicked ? '전체해제' : '전체선택'}</button>
             <button className="btn" style={{ background: '#fff5f5', borderColor: '#fc8181', color: '#c53030', fontWeight: 'bold' }}
               onClick={delPicked}>🗑 선택 삭제{picked.size ? ` (${picked.size})` : ''}</button>
             <button className="btn" style={{ background: '#742a2a', borderColor: '#742a2a', color: '#fff', fontWeight: 'bold' }}
@@ -92,7 +98,11 @@ export default function BackupPage() {
         <table style={{ minWidth: 1700 }}>
           <thead>
             <tr>
-              {isAdmin && <th style={{ width: 30, background: '#fed7d7' }}>✓</th>}
+              {isAdmin && (
+                <th style={{ width: 30, background: '#fed7d7' }}>
+                  <input type="checkbox" checked={allPicked} readOnly onClick={toggleAll} style={{ cursor: 'pointer' }} />
+                </th>
+              )}
               <th style={{ width: 86 }}>날짜</th>
               <th style={{ width: 70 }}>시간</th>
               <th style={{ width: 80 }}>브랜드</th>
