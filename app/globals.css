@@ -113,10 +113,24 @@ tfoot .sum-val{color:#fff!important;background:#1a202c!important}
 .memo-del:hover{color:#e53e3e}
 
 /* ── 모바일: I(변동)까지 보이게 ── */
-@media(max-width:900px){
-  body{margin:6px 6px 6px 28px;font-size:11px}
-  table{min-width:0!important}
-  /* 좌측 9개 열(A~I)만 표시: 브랜드~변동, 나머지는 좌우 스크롤로 */
-  .nav{gap:4px}
-  .nav select,.nav input{font-size:11px}
+@media(max-width:600px){
+  body{margin:4px 4px 4px 26px;font-size:10px}
+  .nav{gap:3px}
+  .nav select,.nav input{font-size:10px;padding:3px 4px}
+  .user-badge,.sel-badge{font-size:10px;padding:3px 7px}
+  .container{height:82vh}
+  /* 표 전체 폭은 유지(가로 스크롤 가능)하되 A~I 9개 열을 화면에 맞게 좁힘 */
+  table{min-width:760px}
+  th,td{padding:2px 1px}
+  input.edit{font-size:10px}
+  /* A~I 열폭 (합 ≈ 378px → 대부분 폰 화면 한눈에) */
+  th:nth-child(1),td:nth-child(1){width:46px!important}
+  th:nth-child(2),td:nth-child(2){width:54px!important}
+  th:nth-child(3),td:nth-child(3){width:34px!important}
+  th:nth-child(4),td:nth-child(4){width:64px!important}
+  th:nth-child(5),td:nth-child(5){width:24px!important}
+  th:nth-child(6),td:nth-child(6){width:40px!important}
+  th:nth-child(7),td:nth-child(7){width:48px!important}
+  th:nth-child(8),td:nth-child(8){width:34px!important}
+  th:nth-child(9),td:nth-child(9){width:34px!important}
 }

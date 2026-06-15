@@ -54,7 +54,6 @@ const HDR = [
   { n: '할인 적용가(S)', w: 92, k: 'dc_price', cls: 'bs' },
   { n: '매일할인', w: 42,  k: null, cls: 'bt' },
   { n: '매일 원가', w: 98, k: null, cls: 'bu' },
-  { n: '판매등록', w: 200, k: null, cls: 'bn' },
 ];
 
 // ═══════════════════════════════════════════════
@@ -931,7 +930,6 @@ export default function Page() {
               const s = salesOf(d);
               const inv = toN(d.qty) - s;
               const calc = calcMap.current.get(id) || { t: '', u: toN(d.factory) };
-              const checks = decodeChecks(d.note);
               const ek = (f) => `${id}:${f}:${epoch}`;
               const tdCls = (colIdx, base) => (base || '') + (inSel(rowIdx, colIdx) ? ' cell-sel' : '');
               const tdProps = (colIdx) => ({
@@ -996,17 +994,6 @@ export default function Page() {
                     </div>
                   </td>
                   <td className="bu" id={'u-' + id}>{krw(calc.u)}</td>
-                  <td className="cb-cell">
-                    <div className="cb-wrap">
-                      {CB_LABELS.map((label, ci) => (
-                        <label key={label} className="cb-item">
-                          <input type="checkbox" checked={!!checks[ci]}
-                            onChange={e => { onCheck(id, ci, e.target.checked); rerender(); }} />
-                          <span>{label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </td>
                 </tr>
               );
             })}
@@ -1021,7 +1008,7 @@ export default function Page() {
               {SALES_FIELDS.map((f, fi) => (
                 <td key={f} className="sum-val">{sums[f] || ''}</td>
               ))}
-              <td colSpan={5}></td>
+              <td colSpan={4}></td>
             </tr>
           </tfoot>
         </table>
