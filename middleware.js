@@ -14,6 +14,7 @@ export function middleware(req) {
   if (
     pathname === '/login' ||
     pathname.startsWith('/api/auth/') ||
+    pathname === '/api/reset' ||
     pathname.startsWith('/_next/') ||
     pathname === '/favicon.ico'
   ) {

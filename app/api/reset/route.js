@@ -69,8 +69,15 @@ async function runReset() {
 function authorized(req) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return true; // 시크릿 미설정 시 통과 (설정 권장)
+  // 1) Vercel Cron 등: Authorization: Bearer <키>
   const auth = req.headers.get('authorization') || '';
-  return auth === `Bearer ${secret}`;
+  if (auth === `Bearer ${secret}`) return true;
+  // 2) 외부 스케줄러(cron-job.org 등): URL 뒤에 ?key=<키>
+  try {
+    const key = new URL(req.url).searchParams.get('key') || '';
+    if (key === secret) return true;
+  } catch (e) {}
+  return false;
 }
 
 // Vercel Cron 은 GET 으로 호출
