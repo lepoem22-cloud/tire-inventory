@@ -493,8 +493,38 @@ export default function Page() {
     const rIdx = list.findIndex(d => d.id === id0);
     if (rIdx < 0) return;
 
-    // 시작 행 아래로 남은 행이 붙여넣을 줄 수보다 적으면 → 부족분 자동 행 추가 (관리자만)
+    // ── 대량 붙여넣기: 추가가 필요한 행이 많으면(50행↑) 빠른 일괄 INSERT 경로 ──
     const need = (rIdx + lines.length) - list.length;
+    if (isAdmin && need >= 50 && startCol === 0) {
+      // 시작이 브랜드(A)열이고 행이 대량 부족 → 시트 통째 입력으로 간주
+      const cells = lines.map(line => line.split('\t'));
+      // 시작 위치 이후의 기존 행들은 새 데이터로 대체되므로, 시작 행 id부터 끝까지 삭제 후 일괄 INSERT
+      const replaceFromIdx = rIdx;
+      const idsToDelete = list.slice(replaceFromIdx).map(d => d.id);
+      (async () => {
+        setStatus({ msg: `대량 입력 중… (${cells.length}행)`, cls: 'saving' });
+        try {
+          const r = await fetch('/api/bulk-insert', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rows: cells, deleteIds: idsToDelete }),
+          });
+          const res = await r.json();
+          if (!res.ok) throw new Error(res.msg || '오류');
+          try { sessionStorage.removeItem('TIRE_CACHE'); } catch (er) {}
+          pending.current.clear();
+          lastEdit.current = 0; activeEdit.current = null;
+          setStatus({ msg: `${res.inserted}행 입력됨`, cls: 'ok' });
+          toast(`${res.inserted}행이 빠르게 입력되었습니다`, 'save', 3000);
+          load();
+        } catch (err) {
+          setStatus({ msg: '대량 입력 실패', cls: 'err' });
+          toast('대량 입력 실패: ' + (err.message || ''), 'err', 4000);
+        }
+      })();
+      return;
+    }
+
+    // ── 일반 붙여넣기: 부족분 자동 행 추가 (관리자만) ──
     if (need > 0) {
       if (!isAdmin) {
         toast(`행이 ${need}개 부족합니다 (관리자가 행을 추가해야 합니다)`, 'warn', 3000);
