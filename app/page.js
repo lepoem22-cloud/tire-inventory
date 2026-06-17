@@ -92,7 +92,7 @@ export default function Page() {
   const [kw, setKw] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [onlySales, setOnlySales] = useState(false);
-  const [sortInfo, setSortInfo] = useState({ idx: null, dir: true });
+  const [sortKeys, setSortKeys] = useState([]); // [{idx, dir}] 앞쪽이 1차 정렬
   const [viewStart, setViewStart] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
   const [myName, setMyName] = useState('');
@@ -525,6 +525,9 @@ export default function Page() {
     }
 
     let applied = 0, skippedAdmin = 0;
+    // 진단: 첫 줄이 탭으로 몇 칸으로 쪼개지는지 (예상 19칸 이하)
+    const firstCells = lines[0].split('\t').length;
+
     lines.forEach((line, i) => {
       const d = list[rIdx + i];
       if (!d) return;
@@ -532,7 +535,10 @@ export default function Page() {
         const fld = COL_FIELD[startCol + j];
         if (!fld) return;
         if (!isAdmin && ADMIN_ONLY.has(fld)) { skippedAdmin++; return; }
-        const v = TEXT_SET.has(fld) ? String(val).trim() : String(val).replace(/[^0-9.-]/g, '');
+        // 텍스트 칸: 양끝 공백 제거 + 셀 안 연속 공백을 1칸으로 정리
+        const v = TEXT_SET.has(fld)
+          ? String(val).replace(/\s+/g, ' ').trim()
+          : String(val).replace(/[^0-9.-]/g, '');
         d[fld] = v;
         pending.current.set(d.id + '_' + fld, { id: d.id, field: fld, value: v, el: null });
         applied++;
@@ -547,7 +553,7 @@ export default function Page() {
     syncCrashSave();
     setEpoch(x => x + 1);
     queueSend();
-    toast(`${applied}개 셀 붙여넣음${skippedAdmin ? ` (권한 없는 ${skippedAdmin}칸 제외)` : ''} — 저장 중`, 'save', 2200);
+    toast(`${applied}개 셀 붙여넣음 (첫줄 ${firstCells}칸 인식)${skippedAdmin ? ` · 권한없는 ${skippedAdmin}칸 제외` : ''}`, 'save', 2600);
   }, [syncCrashSave, queueSend, toast, isAdmin]);
 
   const onKeyUp = useCallback((e) => {
@@ -633,6 +639,21 @@ export default function Page() {
   const invalidateCache = useCallback(() => {
     try { sessionStorage.removeItem('TIRE_CACHE'); } catch (e) {}
   }, []);
+
+  const backupNow = useCallback(async () => {
+    if (!window.confirm('현재 출고·메모 상태를 재고 백업로그에 기록합니다.\n(재고 차감 없이 기록만 남깁니다)\n진행할까요?')) return;
+    setStatus({ msg: '백업 기록 중…', cls: 'saving' });
+    try {
+      const r = await fetch('/api/backup-now', { method: 'POST' });
+      const res = await r.json();
+      if (!res.ok) throw new Error(res.msg || '오류');
+      setStatus({ msg: '백업됨', cls: 'ok' });
+      toast(`${res.backed}건 백업로그에 기록됨`, 'save', 2500);
+    } catch (e) {
+      setStatus({ msg: '백업 실패', cls: 'err' });
+      toast('백업 실패: ' + e.message, 'err', 3000);
+    }
+  }, [toast]);
 
   const deleteAllRows = useCallback(async () => {
     if (!window.confirm('모든 행을 영구 삭제합니다. 되돌릴 수 없습니다.\n정말 전체 삭제할까요?')) return;
@@ -753,7 +774,7 @@ export default function Page() {
   }, []);
 
   // 필터/정렬이 바뀌면 행 순서가 달라지므로 선택 해제 (잘못된 영역 조작 방지)
-  useEffect(() => { setSel(null); }, [brand, kw, showAll, onlySales, sortInfo.idx, sortInfo.dir]);
+  useEffect(() => { setSel(null); }, [brand, kw, showAll, onlySales, sortKeys]);
 
   // 선택 영역 복사 (Ctrl+C) / 삭제 (Delete)
   const copySelection = useCallback(() => {
@@ -902,11 +923,21 @@ export default function Page() {
     });
   }, [toast]);
 
-  // ── 정렬 ───────────────────────────────────
+  // ── 정렬 (다중 정렬: 마지막 클릭이 1차, 이전 것들이 2·3차로 유지) ──
   const doSort = useCallback((i) => {
     const k = HDR[i] && HDR[i].k;
     if (!k) return;
-    setSortInfo(s => ({ idx: i, dir: s.idx === i ? !s.dir : true }));
+    setSortKeys(prev => {
+      const existing = prev.find(s => s.idx === i);
+      // 이미 1차(맨 앞)이면 방향만 토글
+      if (prev.length && prev[0].idx === i) {
+        return [{ idx: i, dir: !prev[0].dir }, ...prev.slice(1)];
+      }
+      // 그 외(처음이거나 2차 이하였던 열)면 맨 앞으로 올림 (방향은 기존 유지 or 오름차순)
+      const rest = prev.filter(s => s.idx !== i);
+      const dir = existing ? existing.dir : true;
+      return [{ idx: i, dir }, ...rest];
+    });
   }, []);
 
   // ── 필터 + 정렬 + 가상화 계산 ───────────────
@@ -920,13 +951,28 @@ export default function Page() {
     if (k && !d.key.includes(k)) continue;
     filtered.push(d);
   }
-  if (sortInfo.idx !== null) {
-    const key = HDR[sortInfo.idx].k;
-    const get = key === '_change' ? (d) => toN(d.qty) - salesOf(d) : (d) => d[key];
-    filtered = [...filtered].sort((a, c) => {
-      const v1 = get(a), v2 = get(c);
+  if (sortKeys.length) {
+    // 숫자형 열 판별 (공장가·수량·변동·출고·할인 등)
+    const NUM_KEYS = new Set(['factory', 'qty', '_change', 'mount', 'direct', 'daily_del', 'ping_del', 'ping_dir', 'store11', 'storefarm', 'lotte', 'dc_rate', 'dc_price']);
+    const getter = (key) => key === '_change'
+      ? (d) => toN(d.qty) - salesOf(d)
+      : (d) => d[key];
+    const cmp = (a, c, key, dir) => {
+      const get = getter(key);
+      let v1 = get(a), v2 = get(c);
+      if (NUM_KEYS.has(key)) { v1 = toN(v1); v2 = toN(v2); }
+      else { v1 = String(v1 ?? ''); v2 = String(v2 ?? ''); }
       if (v1 === v2) return 0;
-      return sortInfo.dir ? (v1 > v2 ? 1 : -1) : (v1 < v2 ? 1 : -1);
+      const r = NUM_KEYS.has(key) ? (v1 - v2) : v1.localeCompare(v2, 'ko', { numeric: true });
+      return dir ? r : -r;
+    };
+    filtered = [...filtered].sort((a, c) => {
+      for (const s of sortKeys) {
+        const key = HDR[s.idx].k;
+        const r = cmp(a, c, key, s.dir);
+        if (r !== 0) return r;
+      }
+      return 0;
     });
   }
 
@@ -982,7 +1028,7 @@ export default function Page() {
         <label className="chk-area chk-sales">
           <input type="checkbox" checked={onlySales} onChange={e => setOnlySales(e.target.checked)} /> 출고만
         </label>
-        <button className="btn" onClick={() => setSortInfo({ idx: null, dir: true })}>정렬초기화</button>
+        <button className="btn" onClick={() => setSortKeys([])}>정렬초기화</button>
         <button className="btn" title="다른 사람이 입력한 최신 내용 불러오기"
           onClick={() => { lastEdit.current = 0; activeEdit.current = null; load(); }}>↻ 새로고침</button>
         {isAdmin && (
@@ -1010,6 +1056,8 @@ export default function Page() {
               onClick={deletePickedRows}>🗑 선택 삭제{pickedRows.size ? ` (${pickedRows.size})` : ''}</button>
             <button className="btn" style={{ background: '#742a2a', borderColor: '#742a2a', color: '#fff', fontWeight: 'bold' }}
               onClick={deleteAllRows}>전체 삭제</button>
+            <button className="btn" style={{ background: '#22543d', borderColor: '#22543d', color: '#fff', fontWeight: 'bold' }}
+              onClick={backupNow}>📦 지금 백업</button>
           </>
         )}
         <div className="mobile-hint">좌우 스크롤로 전체 열 확인</div>
@@ -1026,7 +1074,13 @@ export default function Page() {
               {HDR.map((h, i) => (
                 <th key={h.n} style={{ width: h.w, ...(h.bg ? { background: h.bg } : {}) }}
                     className={h.cls || ''} onClick={() => doSort(i)}>
-                  {h.n}{sortInfo.idx === i ? (sortInfo.dir ? ' ▲' : ' ▼') : ''}
+                  {h.n}{(() => {
+                    const si = sortKeys.findIndex(s => s.idx === i);
+                    if (si < 0) return '';
+                    const arrow = sortKeys[si].dir ? ' ▲' : ' ▼';
+                    // 정렬 기준이 2개 이상일 때만 순번 표시 (1=1차)
+                    return arrow + (sortKeys.length > 1 ? ` ${si + 1}` : '');
+                  })()}
                 </th>
               ))}
             </tr>
